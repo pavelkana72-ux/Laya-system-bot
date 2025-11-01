@@ -1,40 +1,71 @@
 import telebot
+from telebot import types
+from supabase import create_client, Client
 import os
-from flask import Flask
-from supabase import create_client
 
-# Загружаем переменные окружения
-BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
+# Загружаем переменные окружения (Render уже хранит их)
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
-# Проверим, всё ли загружено
-print("BOT_TOKEN:", bool(BOT_TOKEN))
-print("SUPABASE_URL:", bool(SUPABASE_URL))
-print("SUPABASE_KEY:", bool(SUPABASE_KEY))
+# Создаём клиента Supabase
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# Создаём объекты
-bot = telebot.TeleBot(BOT_TOKEN)
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-server = Flask(__name__)
+# Создаём бота
+bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
-# Обработчик Telegram-команд
+# Проверяем соединение с Supabase при запуске
+try:
+    response = supabase.table("users").select("*").limit(1).execute()
+    print("✅ Supabase подключён успешно!")
+except Exception as e:
+    print("⚠️ Ошибка подключения к Supabase:", e)
+
+
+# --- Главное меню ---
+def main_menu():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    btn1 = types.KeyboardButton("🕉 Утро")
+    btn2 = types.KeyboardButton("☀️ День")
+    btn3 = types.KeyboardButton("🌙 Вечер")
+    btn4 = types.KeyboardButton("🌌 Ночь")
+    markup.add(btn1, btn2)
+    markup.add(btn3, btn4)
+    return markup
+
+
+# --- Команды и логика ---
 @bot.message_handler(commands=["start"])
 def start(message):
-    bot.reply_to(message, "🌿 Добро пожаловать в Laya System — пространство дыхания и пробуждения.")
+    user_id = message.chat.id
+    user_name = message.from_user.first_name
 
-@bot.message_handler(func=lambda m: True)
+    # Добавляем пользователя в базу, если его нет
+    try:
+        supabase.table("users").insert({"id": user_id, "name": user_name}).execute()
+    except Exception as e:
+        print("⚠️ Ошибка добавления пользователя:", e)
+
+    bot.send_message(
+        user_id,
+        "Добро пожаловать в Laya System 🌿\nВыбери состояние:",
+        reply_markup=main_menu(),
+    )
+
+
+@bot.message_handler(func=lambda message: True)
 def handle_message(message):
-    bot.reply_to(message, "💫 Всё, что тебе нужно, уже внутри.")
+    if message.text == "🕉 Утро":
+        bot.send_message(message.chat.id, "Практика утреннего дыхания:\n\nВдох — 4, задержка — 2, выдох — 6.")
+    elif message.text == "☀️ День":
+        bot.send_message(message.chat.id, "Практика на день:\n\nОщути ритм дыхания и движения. Всё уже происходит.")
+    elif message.text == "🌙 Вечер":
+        bot.send_message(message.chat.id, "Практика вечернего расслабления:\n\nВыдохни через рот. Позволь телу отдохнуть.")
+    elif message.text == "🌌 Ночь":
+        bot.send_message(message.chat.id, "Ночная медитация:\n\nЗакрой глаза. Всё растворяется в покое.")
+    else:
+        bot.send_message(message.chat.id, "Выбери состояние из меню 🌿", reply_markup=main_menu())
 
-# Flask маршрут для Render
-@server.route("/")
-def home():
-    return "Laya System Bot is alive."
 
-if __name__ == "__main__":
-    # Если Render запускает как веб-сервис
-    import threading
-    t = threading.Thread(target=lambda: bot.polling(none_stop=True, interval=1))
-    t.start()
-    server.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+# --- Запуск бота ---
+if __name__ == "__main
