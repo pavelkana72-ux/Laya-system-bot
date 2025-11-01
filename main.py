@@ -1,98 +1,76 @@
 import telebot
 from telebot import types
-from supabase import create_client, Client
+from flask import Flask, request
 import os
-from datetime import datetime
+from supabase import create_client
 
-# === Настройки окружения ===
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+# --- Supabase setup ---
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-bot = telebot.TeleBot(TELEGRAM_TOKEN)
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+# --- Telegram setup ---
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+bot = telebot.TeleBot(TOKEN)
+WEBHOOK_URL = "https://laya-system-bot.onrender.com/" + TOKEN
 
-# === Главная клавиатура ===
-def main_menu():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.row("🌞 Практика дня", "🌬 Дыхание")
-    markup.row("🧘 Профиль", "⚙️ Настройки")
-    return markup
+# --- Flask setup for Render ---
+app = Flask(__name__)
 
-# === Старт ===
+# --- Основное меню ---
+def main_keyboard():
+    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    btn1 = types.KeyboardButton("🕊 Утро: Пробуждение")
+    btn2 = types.KeyboardButton("🌞 День: Поддержка")
+    btn3 = types.KeyboardButton("🌙 Вечер: Интеграция")
+    btn4 = types.KeyboardButton("🌌 Ночь: Восстановление")
+    keyboard.add(btn1, btn2)
+    keyboard.add(btn3, btn4)
+    return keyboard
+
+# --- Старт ---
 @bot.message_handler(commands=['start'])
-def start(message):
-    user_id = message.from_user.id
-    username = message.from_user.username or "Без имени"
-
-    # Проверяем, есть ли пользователь
-    data, _ = supabase.table("users").select("*").eq("telegram_id", user_id).execute()
-    if not data:
-        supabase.table("users").insert({
-            "telegram_id": user_id,
-            "username": username,
-            "state": "idle",
-            "created_at": datetime.now().isoformat()
-        }).execute()
-
+def start_message(message):
     bot.send_message(
         message.chat.id,
-        f"Привет, {username} 🌿\nЯ — Laya. Твоя дыхательная система готова.",
-        reply_markup=main_menu()
+        "Добро пожаловать в Laya System.\n"
+        "Выбери состояние, с которого начнём сегодня 🌿",
+        reply_markup=main_keyboard()
     )
 
-# === Обработка кнопок ===
-@bot.message_handler(func=lambda msg: True)
-def handle_buttons(message):
+# --- Практики ---
+@bot.message_handler(func=lambda msg: msg.text in [
+    "🕊 Утро: Пробуждение", "🌞 День: Поддержка",
+    "🌙 Вечер: Интеграция", "🌌 Ночь: Восстановление"
+])
+def send_practice(message):
     text = message.text
 
-    if text == "🌞 Практика дня":
-        send_practice(message)
-    elif text == "🌬 Дыхание":
-        send_breathing(message)
-    elif text == "🧘 Профиль":
-        show_profile(message)
-    elif text == "⚙️ Настройки":
-        bot.send_message(message.chat.id, "Настройки пока в разработке ⚙️")
+    if "Утро" in text:
+        practice = "🕊 *Практика утреннего дыхания*\n\nМягко вдохни через нос, ощущая как тело просыпается.\nЗадержи дыхание на 2 секунды — и выдохни всё старое.\nПовтори 3 раза, ощущая внутренний свет."
+    elif "День" in text:
+        practice = "🌞 *Практика поддержки*\n\nСделай короткую паузу. Положи руку на грудь.\nСкажи себе: «Я здесь. Всё происходит правильно».\nСделай глубокий вдох и отпусти."
+    elif "Вечер" in text:
+        practice = "🌙 *Практика интеграции*\n\nСядь удобно. Почувствуй благодарность.\nЗакрой глаза и вспомни один момент, за который ты благодарен сегодня.\nПозволь этому чувству наполнить тебя."
     else:
-        bot.send_message(message.chat.id, "Выбери действие из меню 👇", reply_markup=main_menu())
+        practice = "🌌 *Практика восстановления*\n\nЛяг, расслабь тело. Почувствуй вес.\nС каждым выдохом отпускай напряжение.\nВсё, что тебе не нужно — уходит.\nТы в безопасности."
 
-# === Практика дня ===
-def send_practice(message):
-    practices = [
-        {
-            "name": "Дыхание утреннего солнца",
-            "description": "Сядь удобно. Вдох — свет наполняет тело. Выдох — отпусти всё старое. 5 циклов дыхания.",
-            "duration": "3 минуты"
-        },
-        {
-            "name": "Синхронизация сердца",
-            "description": "Положи руку на сердце. Дыши ровно, считай до 4 на вдох и 4 на выдох. Почувствуй ритм жизни.",
-            "duration": "5 минут"
-        }
-    ]
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    for p in practices:
-        markup.add(p["name"])
-    markup.add("⬅️ Назад")
+    bot.send_message(message.chat.id, practice, parse_mode="Markdown")
 
-    bot.send_message(message.chat.id, "Выбери практику:", reply_markup=markup)
+# --- Flask routes ---
+@app.route('/' + TOKEN, methods=['POST'])
+def webhook():
+    json_str = request.get_data().decode('UTF-8')
+    update = telebot.types.Update.de_json(json_str)
+    bot.process_new_updates([update])
+    return "OK", 200
 
-# === Отображение профиля ===
-def show_profile(message):
-    user_id = message.from_user.id
-    data, _ = supabase.table("users").select("*").eq("telegram_id", user_id).execute()
-    if data:
-        user = data[0]
-        bot.send_message(
-            message.chat.id,
-            f"🧘 Профиль\nИмя: {user['username']}\nСостояние: {user['state']}",
-            reply_markup=main_menu()
-        )
-    else:
-        bot.send_message(message.chat.id, "Профиль не найден.", reply_markup=main_menu())
+@app.route('/')
+def index():
+    return "Laya System Bot is alive", 200
 
-# === Запуск ===
-if __name__ == "__main__":
-    print("✨ Laya System запущена...")
-    bot.polling(none_stop=True, timeout=60)
+# --- Webhook setup ---
+if __name__ == '__main__':
+    bot.remove_webhook()
+    bot.set_webhook(url=WEBHOOK_URL)
+    app.run(host='0.0.0.0', port=10000)
